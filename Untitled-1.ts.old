@@ -1,0 +1,54 @@
+private async insertHistory(message: Message) {
+    const query = {
+        text: `
+            INSERT INTO maka.command_history(message_id, guild_id, channel_id, author_id, command, execution_date)  
+            VALUES($1, $2, $3, $4, $5, to_timestamp($6));
+            `,
+        values: [message.id, message.guild?.id, message.channel.id, message.author.id, this.command, Date.now()/1000],
+    };
+    this.repository.query(query);
+};
+
+private async checkState(message: Message): Promise<boolean> {
+    const stateQuery = {
+        text: `
+            SELECT execution_date FROM maka.states WHERE channel_id = $1;
+            `,
+        values: [message.channel.id],
+    };
+
+    const lastExecution = (await this.repository.query(stateQuery)).rows[0];
+
+    if (!lastExecution) {
+        return true
+    } else {
+        return Math.abs(Date.now() - lastExecution.execution_date.getTime()) / 1000 > 600
+    };
+};
+
+private async upsertState(message: Message) {
+    const upsertQuery = {
+        text: `
+            INSERT INTO maka.states(message_id, guild_id, channel_id, execution_date)  
+            VALUES($1, $2, $3, to_timestamp($4))
+            ON CONFLICT (channel_id)
+            DO 
+            UPDATE SET execution_date = to_timestamp($4);
+            `,
+        values: [message.id, message.guild?.id, message.channel.id, Date.now()/1000],
+    };
+    this.repository.query(upsertQuery);
+}
+
+async route() {
+    if (this.command != null) {
+        if (!(this.command in Domain.Commands)) return;
+        if (await this.checkState(this.message) == true) {
+            switch (this.command) {
+                case Domain.Commands.COOK:
+                    this.insertHistory(this.message)
+            };
+            this.upsertState(this.message)
+        };
+    };
+};
